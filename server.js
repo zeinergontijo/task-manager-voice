@@ -28,12 +28,33 @@ function colecaoTarefas() {
   return db.collection('usuarios').doc(USUARIO_ID).collection('tarefas');
 }
 
-function paraJson(doc) {
+// Status gravado no banco; "atrasada" e "vence_hoje" não são gravadas, são calculadas pelo prazo
+const STATUS = ['em_aberto', 'em_andamento', 'realizada'];
+
+// Data de hoje no horário de Brasília (a Vercel roda em UTC)
+function hoje() {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+}
+
+// Tarefas antigas só têm o campo "concluida"
+function statusDe(dados) {
+  if (STATUS.includes(dados.status)) return dados.status;
+  return dados.concluida ? 'realizada' : 'em_aberto';
+}
+
+function paraJson(doc, dataHoje = hoje()) {
   const dados = doc.data();
+  const status = statusDe(dados);
+  let situacao = status;
+  if (status !== 'realizada' && dados.prazo) {
+    if (dados.prazo < dataHoje) situacao = 'atrasada';
+    else if (dados.prazo === dataHoje) situacao = 'vence_hoje';
+  }
   return {
     id: doc.id,
     titulo: dados.titulo,
-    concluida: dados.concluida,
+    status,
+    situacao,
     tipo: dados.tipo || null,
     prazo: dados.prazo || null,
     criadoEm: dados.criadoEm?.toDate?.().toISOString() || null
@@ -70,24 +91,28 @@ function criarServidorMcp() {
     {
       title: 'Listar tarefas',
       description:
-        'Lista as tarefas do usuário, opcionalmente só de um tipo. Use antes de concluir, editar ou deletar, para descobrir o id da tarefa certa. Também devolve os tipos já usados.',
+        'Lista as tarefas do usuário, filtrando por situação e tipo. Cada tarefa vem com "situacao": em_aberto, em_andamento, vence_hoje (não realizada e prazo é hoje), atrasada (não realizada e prazo vencido) ou realizada; "status" mostra se ela já foi começada. Use antes de alterar ou deletar, para descobrir o id da tarefa certa. Também devolve a data de hoje e os tipos já usados.',
       inputSchema: {
-        status: z
-          .enum(['pendentes', 'concluidas', 'todas'])
+        situacao: z
+          .enum(['pendentes', 'em_aberto', 'em_andamento', 'vence_hoje', 'atrasada', 'realizada', 'todas'])
           .default('pendentes')
-          .describe('Quais tarefas listar'),
+          .describe('pendentes = tudo que não foi realizado (em aberto, em andamento e atrasadas)'),
         tipo: tipoSchema.optional().describe('Listar só tarefas deste tipo')
       }
     },
-    async ({ status, tipo }) => {
+    async ({ situacao, tipo }) => {
+      const dataHoje = hoje();
       const snapshot = await colecaoTarefas().get();
-      const todas = snapshot.docs.map(paraJson);
+      const todas = snapshot.docs.map(doc => paraJson(doc, dataHoje));
       const tarefas = todas
-        .filter(t => status === 'todas' || t.concluida === (status === 'concluidas'))
+        .filter(t =>
+          situacao === 'todas' ||
+          (situacao === 'pendentes' ? t.status !== 'realizada' : t.situacao === situacao)
+        )
         .filter(t => !tipo || t.tipo === tipo)
         .sort((a, b) => (b.criadoEm || '').localeCompare(a.criadoEm || ''));
       const tiposExistentes = [...new Set(todas.map(t => t.tipo).filter(Boolean))].sort();
-      return resposta({ total: tarefas.length, tiposExistentes, tarefas });
+      return resposta({ hoje: dataHoje, total: tarefas.length, tiposExistentes, tarefas });
     }
   );
 
@@ -100,20 +125,22 @@ function criarServidorMcp() {
       inputSchema: {
         titulo: z.string().min(1).describe('Descrição curta da tarefa'),
         tipo: tipoSchema.optional(),
-        prazo: prazoSchema.optional()
+        prazo: prazoSchema.optional(),
+        status: z.enum(STATUS).default('em_aberto').describe('Use em_andamento se o usuário já começou a tarefa')
       }
     },
-    async ({ titulo, tipo, prazo }) => {
+    async ({ titulo, tipo, prazo, status }) => {
       const agora = new Date();
       const docRef = await colecaoTarefas().add({
         titulo,
-        concluida: false,
+        status,
+        concluida: status === 'realizada',
         ...(tipo && { tipo }),
         ...(prazo && { prazo }),
         criadoEm: agora,
         atualizadoEm: agora
       });
-      return resposta({ criada: { id: docRef.id, titulo, tipo: tipo || null, prazo: prazo || null } });
+      return resposta({ criada: paraJson(await docRef.get()) });
     }
   );
 
@@ -122,21 +149,27 @@ function criarServidorMcp() {
     {
       title: 'Atualizar tarefa',
       description:
-        'Altera uma tarefa existente: marca como concluída ou pendente, muda o título, o tipo ou o prazo. Passe só o que mudar.',
+        'Altera uma tarefa existente: muda o status, o título, o tipo ou o prazo. Passe só o que mudar. "atrasada" e "vence_hoje" não são status: dependem do prazo.',
       inputSchema: {
         id: z.string().describe('Id da tarefa, obtido com listar_tarefas'),
-        concluida: z.boolean().optional().describe('true para concluir, false para reabrir'),
+        status: z
+          .enum(STATUS)
+          .optional()
+          .describe('em_aberto (reabrir), em_andamento (começou) ou realizada (concluiu)'),
         titulo: z.string().min(1).optional(),
         tipo: tipoSchema.nullable().optional().describe('Novo tipo ou null para remover'),
         prazo: prazoSchema.nullable().optional().describe('Nova data limite (AAAA-MM-DD) ou null para remover')
       }
     },
-    async ({ id, concluida, titulo, tipo, prazo }) => {
+    async ({ id, status, titulo, tipo, prazo }) => {
       const docRef = colecaoTarefas().doc(id);
       if (!(await docRef.get()).exists) return erro(`Tarefa ${id} não encontrada.`);
 
       const mudancas = { atualizadoEm: new Date() };
-      if (concluida !== undefined) mudancas.concluida = concluida;
+      if (status !== undefined) {
+        mudancas.status = status;
+        mudancas.concluida = status === 'realizada';
+      }
       if (titulo !== undefined) mudancas.titulo = titulo;
       if (tipo !== undefined) mudancas.tipo = tipo ?? admin.firestore.FieldValue.delete();
       if (prazo !== undefined) mudancas.prazo = prazo ?? admin.firestore.FieldValue.delete();
@@ -150,7 +183,7 @@ function criarServidorMcp() {
     'deletar_tarefa',
     {
       title: 'Deletar tarefa',
-      description: 'Apaga uma tarefa definitivamente. Para tarefas feitas, prefira atualizar_tarefa com concluida=true.',
+      description: 'Apaga uma tarefa definitivamente. Para tarefas feitas, prefira atualizar_tarefa com status=realizada.',
       inputSchema: {
         id: z.string().describe('Id da tarefa, obtido com listar_tarefas')
       },

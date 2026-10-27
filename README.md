@@ -14,9 +14,21 @@ Você (voz/texto) → app do Claude → conector "Tarefas" → este servidor (Ve
 
 | Ferramenta | O que faz |
 |---|---|
-| `listar_tarefas` | Lista pendentes, concluídas ou todas, opcionalmente de um tipo |
-| `criar_tarefa` | Cria uma tarefa, com tipo e prazo (AAAA-MM-DD) opcionais |
-| `atualizar_tarefa` | Conclui, reabre, renomeia ou muda o tipo ou o prazo |
+| `listar_tarefas` | Lista por situação (em aberto, em andamento, vence hoje, atrasada, realizada) e tipo |
+| `criar_tarefa` | Cria uma tarefa, com tipo, prazo (AAAA-MM-DD) e status opcionais |
+| `atualizar_tarefa` | Muda o status, o título, o tipo ou o prazo |
+
+### Situação da tarefa
+
+| Situação | Quando |
+|---|---|
+| `em_aberto` | Ainda não começou |
+| `em_andamento` | Já começou |
+| `realizada` | Concluída |
+| `vence_hoje` | Não realizada e o prazo é hoje |
+| `atrasada` | Não realizada e com prazo vencido |
+
+`vence_hoje` e `atrasada` são calculadas pela data de Brasília a cada consulta, não são gravadas.
 | `deletar_tarefa` | Apaga uma tarefa |
 
 Exemplos do que dizer ao Claude:
@@ -26,6 +38,8 @@ Exemplos do que dizer ao Claude:
 "Anota na fazenda: vacinar o gado na segunda"
 "O que eu ainda tenho pendente?"
 "O que tem de Softmax?"
+"Comecei a vacinação do gado"
+"O que está atrasado?"
 "Já paguei a luz"
 "Apaga a tarefa da ração"
 ```
@@ -103,7 +117,8 @@ O backup diário para o Google Drive continua igual — veja `BACKUP-AUTOMATICO.
 ```
 usuarios/{base64(TAREFAS_EMAIL)}/tarefas/{taskId}
   ├─ titulo: string
-  ├─ concluida: boolean
+  ├─ status: em_aberto | em_andamento | realizada
+  ├─ concluida: boolean (espelho de status = realizada, usado pelo backup)
   ├─ tipo: string (minúsculas, opcional — ex.: fazenda, softmax, pessoal)
   ├─ prazo: string (AAAA-MM-DD, opcional)
   ├─ criadoEm: timestamp
