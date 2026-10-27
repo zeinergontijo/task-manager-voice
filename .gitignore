@@ -1,0 +1,15 @@
+node_modules/
+.env
+.env.local
+.env.*.local
+firebase-config.json
+dist/
+build/
+*.log
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.cache/
