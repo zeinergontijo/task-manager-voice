@@ -14,16 +14,18 @@ Você (voz/texto) → app do Claude → conector "Tarefas" → este servidor (Ve
 
 | Ferramenta | O que faz |
 |---|---|
-| `listar_tarefas` | Lista pendentes, concluídas ou todas |
-| `criar_tarefa` | Cria uma tarefa, com prazo opcional (AAAA-MM-DD) |
-| `atualizar_tarefa` | Conclui, reabre, renomeia ou muda o prazo |
+| `listar_tarefas` | Lista pendentes, concluídas ou todas, opcionalmente de um tipo |
+| `criar_tarefa` | Cria uma tarefa, com tipo e prazo (AAAA-MM-DD) opcionais |
+| `atualizar_tarefa` | Conclui, reabre, renomeia ou muda o tipo ou o prazo |
 | `deletar_tarefa` | Apaga uma tarefa |
 
 Exemplos do que dizer ao Claude:
 
 ```
 "Anota: pagar a conta de luz até sexta e comprar ração"
+"Anota na fazenda: vacinar o gado na segunda"
 "O que eu ainda tenho pendente?"
+"O que tem de Softmax?"
 "Já paguei a luz"
 "Apaga a tarefa da ração"
 ```
@@ -102,6 +104,7 @@ O backup diário para o Google Drive continua igual — veja `BACKUP-AUTOMATICO.
 usuarios/{base64(TAREFAS_EMAIL)}/tarefas/{taskId}
   ├─ titulo: string
   ├─ concluida: boolean
+  ├─ tipo: string (minúsculas, opcional — ex.: fazenda, softmax, pessoal)
   ├─ prazo: string (AAAA-MM-DD, opcional)
   ├─ criadoEm: timestamp
   └─ atualizadoEm: timestamp

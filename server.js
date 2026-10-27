@@ -34,6 +34,7 @@ function paraJson(doc) {
     id: doc.id,
     titulo: dados.titulo,
     concluida: dados.concluida,
+    tipo: dados.tipo || null,
     prazo: dados.prazo || null,
     criadoEm: dados.criadoEm?.toDate?.().toISOString() || null
   };
@@ -52,6 +53,14 @@ const prazoSchema = z
   .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use o formato AAAA-MM-DD')
   .describe('Data limite no formato AAAA-MM-DD');
 
+// Tipos são livres, mas guardados sempre em minúsculas para "Fazenda" e "fazenda" serem o mesmo
+const tipoSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .transform(t => t.toLowerCase())
+  .describe('Categoria da tarefa, ex.: fazenda, softmax, pessoal. Prefira um tipo que já exista (veja tiposExistentes em listar_tarefas)');
+
 // Ferramentas que o Claude pode usar
 function criarServidorMcp() {
   const server = new McpServer({ name: 'tarefas', version: '2.0.0' });
@@ -61,21 +70,24 @@ function criarServidorMcp() {
     {
       title: 'Listar tarefas',
       description:
-        'Lista as tarefas do usuário. Use antes de concluir, editar ou deletar, para descobrir o id da tarefa certa.',
+        'Lista as tarefas do usuário, opcionalmente só de um tipo. Use antes de concluir, editar ou deletar, para descobrir o id da tarefa certa. Também devolve os tipos já usados.',
       inputSchema: {
         status: z
           .enum(['pendentes', 'concluidas', 'todas'])
           .default('pendentes')
-          .describe('Quais tarefas listar')
+          .describe('Quais tarefas listar'),
+        tipo: tipoSchema.optional().describe('Listar só tarefas deste tipo')
       }
     },
-    async ({ status }) => {
+    async ({ status, tipo }) => {
       const snapshot = await colecaoTarefas().get();
-      const tarefas = snapshot.docs
-        .map(paraJson)
+      const todas = snapshot.docs.map(paraJson);
+      const tarefas = todas
         .filter(t => status === 'todas' || t.concluida === (status === 'concluidas'))
+        .filter(t => !tipo || t.tipo === tipo)
         .sort((a, b) => (b.criadoEm || '').localeCompare(a.criadoEm || ''));
-      return resposta({ total: tarefas.length, tarefas });
+      const tiposExistentes = [...new Set(todas.map(t => t.tipo).filter(Boolean))].sort();
+      return resposta({ total: tarefas.length, tiposExistentes, tarefas });
     }
   );
 
@@ -83,22 +95,25 @@ function criarServidorMcp() {
     'criar_tarefa',
     {
       title: 'Criar tarefa',
-      description: 'Cria uma nova tarefa pendente.',
+      description:
+        'Cria uma nova tarefa pendente. Se o usuário não disser o tipo e ele não for óbvio pelo contexto, pergunte.',
       inputSchema: {
         titulo: z.string().min(1).describe('Descrição curta da tarefa'),
+        tipo: tipoSchema.optional(),
         prazo: prazoSchema.optional()
       }
     },
-    async ({ titulo, prazo }) => {
+    async ({ titulo, tipo, prazo }) => {
       const agora = new Date();
       const docRef = await colecaoTarefas().add({
         titulo,
         concluida: false,
+        ...(tipo && { tipo }),
         ...(prazo && { prazo }),
         criadoEm: agora,
         atualizadoEm: agora
       });
-      return resposta({ criada: { id: docRef.id, titulo, prazo: prazo || null } });
+      return resposta({ criada: { id: docRef.id, titulo, tipo: tipo || null, prazo: prazo || null } });
     }
   );
 
@@ -107,21 +122,23 @@ function criarServidorMcp() {
     {
       title: 'Atualizar tarefa',
       description:
-        'Altera uma tarefa existente: marca como concluída ou pendente, muda o título ou o prazo. Passe só o que mudar.',
+        'Altera uma tarefa existente: marca como concluída ou pendente, muda o título, o tipo ou o prazo. Passe só o que mudar.',
       inputSchema: {
         id: z.string().describe('Id da tarefa, obtido com listar_tarefas'),
         concluida: z.boolean().optional().describe('true para concluir, false para reabrir'),
         titulo: z.string().min(1).optional(),
+        tipo: tipoSchema.nullable().optional().describe('Novo tipo ou null para remover'),
         prazo: prazoSchema.nullable().optional().describe('Nova data limite (AAAA-MM-DD) ou null para remover')
       }
     },
-    async ({ id, concluida, titulo, prazo }) => {
+    async ({ id, concluida, titulo, tipo, prazo }) => {
       const docRef = colecaoTarefas().doc(id);
       if (!(await docRef.get()).exists) return erro(`Tarefa ${id} não encontrada.`);
 
       const mudancas = { atualizadoEm: new Date() };
       if (concluida !== undefined) mudancas.concluida = concluida;
       if (titulo !== undefined) mudancas.titulo = titulo;
+      if (tipo !== undefined) mudancas.tipo = tipo ?? admin.firestore.FieldValue.delete();
       if (prazo !== undefined) mudancas.prazo = prazo ?? admin.firestore.FieldValue.delete();
 
       await docRef.update(mudancas);
