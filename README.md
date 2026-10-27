@@ -1,4 +1,4 @@
-# ✅ Tarefas no Claude
+# 📅 Agenda no Claude
 
 Um **servidor MCP** que dá ao Claude acesso às suas tarefas. Não há tela nem app próprio:
 você conversa com o Claude (iPhone, computador ou claude.ai), por voz ou texto, e ele
@@ -7,7 +7,7 @@ cria, lista, conclui e apaga tarefas sozinho.
 Roda na sua assinatura do Claude — **não precisa de chave da API da Anthropic**.
 
 ```
-Você (voz/texto) → app do Claude → conector "Tarefas" → este servidor (Vercel) → Firestore
+Você (voz/texto) → app do Claude → conector "Agenda" → este servidor (Vercel) → Firestore
 ```
 
 ## 🧰 Ferramentas que o Claude recebe
@@ -84,7 +84,7 @@ A variável `ANTHROPIC_API_KEY` não é mais usada e pode ser removida.
 
 1. No **claude.ai** (navegador), abra **Configurações → Conectores**
 2. Clique em **Adicionar conector personalizado**
-3. Nome: `Tarefas` — URL: `https://SEU-APP.vercel.app/mcp/SEU_MCP_TOKEN`
+3. Nome: `Agenda` — URL: `https://SEU-APP.vercel.app/mcp/SEU_MCP_TOKEN`
 4. Salve. O conector passa a aparecer também no app do iPhone.
 
 Na primeira vez que o Claude usar uma ferramenta, ele pede sua permissão; você pode

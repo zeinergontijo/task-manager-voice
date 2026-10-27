@@ -84,7 +84,7 @@ const tipoSchema = z
 
 // Ferramentas que o Claude pode usar
 function criarServidorMcp() {
-  const server = new McpServer({ name: 'tarefas', version: '2.0.0' });
+  const server = new McpServer({ name: 'agenda', version: '2.0.0' });
 
   server.registerTool(
     'listar_tarefas',
@@ -246,7 +246,7 @@ app.all('/mcp/:token', (req, res) => {
 });
 
 app.get('/', (req, res) => {
-  res.send('Servidor MCP de tarefas rodando.');
+  res.send('Servidor MCP da Agenda rodando.');
 });
 
 if (!USUARIO_ID) console.warn('⚠️ TAREFAS_EMAIL não definido no .env');

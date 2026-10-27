@@ -166,7 +166,7 @@ Salve este link! Use em qualquer lugar.
 
 1. No **claude.ai**, abra **Configurações → Conectores**
 2. **Adicionar conector personalizado**
-3. **Nome:** "Tarefas"
+3. **Nome:** "Agenda"
 4. **URL:** `https://task-manager-voice.vercel.app/mcp/SEU_MCP_TOKEN`
 
 **Pronto! Use pelo app do Claude no iPhone, com ou sem PC ligado! 🎉**
