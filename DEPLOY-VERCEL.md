@@ -138,9 +138,10 @@ Você verá um formulário para **Environment Variables**:
 
 Adicione:
 ```
-ANTHROPIC_API_KEY=sk-ant-...
+FIREBASE_SERVICE_ACCOUNT=<conteúdo inteiro do firebase-config.json>
 FIREBASE_DATABASE_URL=https://seu-projeto.firebaseio.com
-PORT=3000
+TAREFAS_EMAIL=seu@email.com
+MCP_TOKEN=<mesmo token do .env>
 ```
 
 5. **Clique "Deploy"**
@@ -161,16 +162,14 @@ Salve este link! Use em qualquer lugar.
 
 ---
 
-## 📱 Usar no iPhone Agora
+## 🔌 Conectar ao Claude
 
-1. **Abra Safari**
-2. **Digite:** `https://task-manager-voice.vercel.app`
-3. **Clique em ↗️ Compartilhar**
-4. **Adicionar à Tela Inicial**
-5. **Nome:** "Tarefas"
-6. **Adicionar**
+1. No **claude.ai**, abra **Configurações → Conectores**
+2. **Adicionar conector personalizado**
+3. **Nome:** "Tarefas"
+4. **URL:** `https://task-manager-voice.vercel.app/mcp/SEU_MCP_TOKEN`
 
-**Pronto! Funciona sempre, com ou sem PC ligado! 🎉**
+**Pronto! Use pelo app do Claude no iPhone, com ou sem PC ligado! 🎉**
 
 ---
 
