@@ -31,9 +31,13 @@ function colecaoTarefas() {
 // Status gravado no banco; "atrasada" e "vence_hoje" não são gravadas, são calculadas pelo prazo
 const STATUS = ['em_aberto', 'em_andamento', 'realizada'];
 
-// Data de hoje no horário de Brasília (a Vercel roda em UTC)
+// Datas no formato AAAA-MM-DD pelo horário de Brasília (a Vercel roda em UTC)
+function dataBR(data) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(data);
+}
+
 function hoje() {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+  return dataBR(new Date());
 }
 
 // Tarefas antigas só têm o campo "concluida"
@@ -50,6 +54,10 @@ function paraJson(doc, dataHoje = hoje()) {
     if (dados.prazo < dataHoje) situacao = 'atrasada';
     else if (dados.prazo === dataHoje) situacao = 'vence_hoje';
   }
+  const criadoEm = dados.criadoEm?.toDate?.() || null;
+  // Tarefas realizadas antes de existir "realizadaEm" usam a última atualização
+  const realizadaEm =
+    status === 'realizada' ? (dados.realizadaEm || dados.atualizadoEm)?.toDate?.() || null : null;
   return {
     id: doc.id,
     titulo: dados.titulo,
@@ -57,8 +65,20 @@ function paraJson(doc, dataHoje = hoje()) {
     situacao,
     tipo: dados.tipo || null,
     prazo: dados.prazo || null,
-    criadoEm: dados.criadoEm?.toDate?.().toISOString() || null
+    criadoEm: criadoEm?.toISOString() || null,
+    realizadaEm: realizadaEm ? dataBR(realizadaEm) : null,
+    // Data usada nos resumos por período
+    dataReferencia: realizadaEm ? dataBR(realizadaEm) : dados.prazo || (criadoEm ? dataBR(criadoEm) : null)
   };
+}
+
+const SITUACOES = ['em_aberto', 'em_andamento', 'vence_hoje', 'atrasada', 'realizada'];
+
+function contarPorSituacao(tarefas) {
+  const contagem = Object.fromEntries(SITUACOES.map(s => [s, 0]));
+  for (const t of tarefas) contagem[t.situacao]++;
+  contagem.total = tarefas.length;
+  return contagem;
 }
 
 function resposta(conteudo) {
@@ -117,6 +137,56 @@ function criarServidorMcp() {
   );
 
   server.registerTool(
+    'resumo_tarefas',
+    {
+      title: 'Resumo de tarefas por período',
+      description:
+        'Conta as tarefas de um período por situação (em_aberto, em_andamento, vence_hoje, atrasada, realizada) e por tipo, e lista os títulos de cada grupo. ' +
+        'Cada tarefa entra no período pela sua data de referência: realizadas pela data em que foram concluídas; as demais pelo prazo, ou pela data de criação se não tiverem prazo. ' +
+        'Use para perguntas como "quantas tarefas atrasadas tenho em outubro?" ou "o que concluí esta semana?". Se o usuário estiver falando por voz, responda com os números primeiro, de forma curta.',
+      inputSchema: {
+        de: prazoSchema.optional().describe('Início do período (AAAA-MM-DD), inclusive. Omita para não limitar o início'),
+        ate: prazoSchema.optional().describe('Fim do período (AAAA-MM-DD), inclusive. Omita para não limitar o fim'),
+        tipo: tipoSchema.optional().describe('Resumir só tarefas deste tipo'),
+        incluir_lista: z.boolean().default(true).describe('false para devolver só os números')
+      }
+    },
+    async ({ de, ate, tipo, incluir_lista }) => {
+      if (de && ate && de > ate) return erro('A data "de" é posterior à data "ate".');
+
+      const dataHoje = hoje();
+      const snapshot = await colecaoTarefas().get();
+      const tarefas = snapshot.docs
+        .map(doc => paraJson(doc, dataHoje))
+        .filter(t => !tipo || t.tipo === tipo)
+        .filter(t => (!de || (t.dataReferencia && t.dataReferencia >= de)) && (!ate || (t.dataReferencia && t.dataReferencia <= ate)))
+        .sort((a, b) => (a.dataReferencia || '').localeCompare(b.dataReferencia || ''));
+
+      const porTipo = {};
+      for (const t of tarefas) (porTipo[t.tipo || 'sem_tipo'] ||= []).push(t);
+
+      const conteudo = {
+        hoje: dataHoje,
+        periodo: { de: de || null, ate: ate || null },
+        tipo: tipo || null,
+        contagem: contarPorSituacao(tarefas),
+        porTipo: Object.fromEntries(Object.entries(porTipo).map(([k, lista]) => [k, contarPorSituacao(lista)]))
+      };
+      if (incluir_lista) {
+        conteudo.tarefas = Object.fromEntries(
+          SITUACOES.map(s => [
+            s,
+            tarefas
+              .filter(t => t.situacao === s)
+              .map(({ id, titulo, tipo, prazo, realizadaEm }) => ({ id, titulo, tipo, prazo, realizadaEm }))
+          ]).filter(([, lista]) => lista.length)
+        );
+      }
+      return resposta(conteudo);
+    }
+  );
+
+  server.registerTool(
     'criar_tarefa',
     {
       title: 'Criar tarefa',
@@ -135,6 +205,7 @@ function criarServidorMcp() {
         titulo,
         status,
         concluida: status === 'realizada',
+        ...(status === 'realizada' && { realizadaEm: agora }),
         ...(tipo && { tipo }),
         ...(prazo && { prazo }),
         criadoEm: agora,
@@ -163,12 +234,18 @@ function criarServidorMcp() {
     },
     async ({ id, status, titulo, tipo, prazo }) => {
       const docRef = colecaoTarefas().doc(id);
-      if (!(await docRef.get()).exists) return erro(`Tarefa ${id} não encontrada.`);
+      const atual = await docRef.get();
+      if (!atual.exists) return erro(`Tarefa ${id} não encontrada.`);
 
       const mudancas = { atualizadoEm: new Date() };
       if (status !== undefined) {
         mudancas.status = status;
         mudancas.concluida = status === 'realizada';
+        if (status !== 'realizada') {
+          mudancas.realizadaEm = admin.firestore.FieldValue.delete();
+        } else if (statusDe(atual.data()) !== 'realizada') {
+          mudancas.realizadaEm = mudancas.atualizadoEm;
+        }
       }
       if (titulo !== undefined) mudancas.titulo = titulo;
       if (tipo !== undefined) mudancas.tipo = tipo ?? admin.firestore.FieldValue.delete();

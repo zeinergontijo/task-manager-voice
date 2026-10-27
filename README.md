@@ -15,6 +15,7 @@ Você (voz/texto) → app do Claude → conector "Agenda" → este servidor (Ver
 | Ferramenta | O que faz |
 |---|---|
 | `listar_tarefas` | Lista por situação (em aberto, em andamento, vence hoje, atrasada, realizada) e tipo |
+| `resumo_tarefas` | Conta e agrupa as tarefas de um período por situação e tipo |
 | `criar_tarefa` | Cria uma tarefa, com tipo, prazo (AAAA-MM-DD) e status opcionais |
 | `atualizar_tarefa` | Muda o status, o título, o tipo ou o prazo |
 
@@ -29,6 +30,12 @@ Você (voz/texto) → app do Claude → conector "Agenda" → este servidor (Ver
 | `atrasada` | Não realizada e com prazo vencido |
 
 `vence_hoje` e `atrasada` são calculadas pela data de Brasília a cada consulta, não são gravadas.
+
+### Resumo por período
+
+No `resumo_tarefas`, cada tarefa entra no período pela sua **data de referência**:
+realizadas pela data em que foram concluídas; as demais pelo prazo, ou pela data de
+criação se não tiverem prazo.
 | `deletar_tarefa` | Apaga uma tarefa |
 
 Exemplos do que dizer ao Claude:
@@ -40,6 +47,8 @@ Exemplos do que dizer ao Claude:
 "O que tem de Softmax?"
 "Comecei a vacinação do gado"
 "O que está atrasado?"
+"Quantas tarefas eu concluí em outubro?"
+"Me dá um resumo da fazenda deste mês"
 "Já paguei a luz"
 "Apaga a tarefa da ração"
 ```
@@ -121,6 +130,7 @@ usuarios/{base64(TAREFAS_EMAIL)}/tarefas/{taskId}
   ├─ concluida: boolean (espelho de status = realizada, usado pelo backup)
   ├─ tipo: string (minúsculas, opcional — ex.: fazenda, softmax, pessoal)
   ├─ prazo: string (AAAA-MM-DD, opcional)
+  ├─ realizadaEm: timestamp (quando foi concluída)
   ├─ criadoEm: timestamp
   └─ atualizadoEm: timestamp
 ```
