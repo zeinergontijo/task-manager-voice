@@ -40,19 +40,34 @@ function hoje() {
   return dataBR(new Date());
 }
 
+// Data e hora (HH:MM) de agora no horário de Brasília
+function agoraBR() {
+  const agora = new Date();
+  const hora = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'America/Sao_Paulo',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23'
+  }).format(agora);
+  return { data: dataBR(agora), hora };
+}
+
 // Tarefas antigas só têm o campo "concluida"
 function statusDe(dados) {
   if (STATUS.includes(dados.status)) return dados.status;
   return dados.concluida ? 'realizada' : 'em_aberto';
 }
 
-function paraJson(doc, dataHoje = hoje()) {
+function paraJson(doc, agora = agoraBR()) {
   const dados = doc.data();
   const status = statusDe(dados);
   let situacao = status;
   if (status !== 'realizada' && dados.prazo) {
-    if (dados.prazo < dataHoje) situacao = 'atrasada';
-    else if (dados.prazo === dataHoje) situacao = 'vence_hoje';
+    if (dados.prazo < agora.data) situacao = 'atrasada';
+    else if (dados.prazo === agora.data) {
+      // Compromisso de hoje com hora já passada também está atrasado
+      situacao = dados.hora && dados.hora < agora.hora ? 'atrasada' : 'vence_hoje';
+    }
   }
   const criadoEm = dados.criadoEm?.toDate?.() || null;
   // Tarefas realizadas antes de existir "realizadaEm" usam a última atualização
@@ -65,6 +80,7 @@ function paraJson(doc, dataHoje = hoje()) {
     situacao,
     tipo: dados.tipo || null,
     prazo: dados.prazo || null,
+    hora: dados.hora || null,
     criadoEm: criadoEm?.toISOString() || null,
     realizadaEm: realizadaEm ? dataBR(realizadaEm) : null,
     // Data usada nos resumos por período
@@ -94,6 +110,11 @@ const prazoSchema = z
   .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use o formato AAAA-MM-DD')
   .describe('Data limite no formato AAAA-MM-DD');
 
+const horaSchema = z
+  .string()
+  .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use o formato HH:MM (24 horas)')
+  .describe('Hora do compromisso no formato HH:MM (24 horas), horário de Brasília. Só vale junto com um prazo');
+
 // Tipos são livres, mas guardados sempre em minúsculas para "Fazenda" e "fazenda" serem o mesmo
 const tipoSchema = z
   .string()
@@ -111,7 +132,7 @@ function criarServidorMcp() {
     {
       title: 'Listar tarefas',
       description:
-        'Lista as tarefas do usuário, filtrando por situação e tipo. Cada tarefa vem com "situacao": em_aberto, em_andamento, vence_hoje (não realizada e prazo é hoje), atrasada (não realizada e prazo vencido) ou realizada; "status" mostra se ela já foi começada. Use antes de alterar ou deletar, para descobrir o id da tarefa certa. Também devolve a data de hoje e os tipos já usados.',
+        'Lista as tarefas do usuário, filtrando por situação e tipo. Cada tarefa vem com "situacao": em_aberto, em_andamento, vence_hoje (não realizada e prazo é hoje), atrasada (não realizada e prazo vencido, ou prazo hoje com hora já passada) ou realizada; "status" mostra se ela já foi começada. Use antes de alterar ou deletar, para descobrir o id da tarefa certa. Também devolve a data de hoje e os tipos já usados.',
       inputSchema: {
         situacao: z
           .enum(['pendentes', 'em_aberto', 'em_andamento', 'vence_hoje', 'atrasada', 'realizada', 'todas'])
@@ -121,9 +142,9 @@ function criarServidorMcp() {
       }
     },
     async ({ situacao, tipo }) => {
-      const dataHoje = hoje();
+      const agora = agoraBR();
       const snapshot = await colecaoTarefas().get();
-      const todas = snapshot.docs.map(doc => paraJson(doc, dataHoje));
+      const todas = snapshot.docs.map(doc => paraJson(doc, agora));
       const tarefas = todas
         .filter(t =>
           situacao === 'todas' ||
@@ -132,7 +153,7 @@ function criarServidorMcp() {
         .filter(t => !tipo || t.tipo === tipo)
         .sort((a, b) => (b.criadoEm || '').localeCompare(a.criadoEm || ''));
       const tiposExistentes = [...new Set(todas.map(t => t.tipo).filter(Boolean))].sort();
-      return resposta({ hoje: dataHoje, total: tarefas.length, tiposExistentes, tarefas });
+      return resposta({ hoje: agora.data, agora: agora.hora, total: tarefas.length, tiposExistentes, tarefas });
     }
   );
 
@@ -154,19 +175,22 @@ function criarServidorMcp() {
     async ({ de, ate, tipo, incluir_lista }) => {
       if (de && ate && de > ate) return erro('A data "de" é posterior à data "ate".');
 
-      const dataHoje = hoje();
+      const agora = agoraBR();
       const snapshot = await colecaoTarefas().get();
       const tarefas = snapshot.docs
-        .map(doc => paraJson(doc, dataHoje))
+        .map(doc => paraJson(doc, agora))
         .filter(t => !tipo || t.tipo === tipo)
         .filter(t => (!de || (t.dataReferencia && t.dataReferencia >= de)) && (!ate || (t.dataReferencia && t.dataReferencia <= ate)))
-        .sort((a, b) => (a.dataReferencia || '').localeCompare(b.dataReferencia || ''));
+        .sort((a, b) =>
+          (a.dataReferencia || '').localeCompare(b.dataReferencia || '') || (a.hora || '').localeCompare(b.hora || '')
+        );
 
       const porTipo = {};
       for (const t of tarefas) (porTipo[t.tipo || 'sem_tipo'] ||= []).push(t);
 
       const conteudo = {
-        hoje: dataHoje,
+        hoje: agora.data,
+        agora: agora.hora,
         periodo: { de: de || null, ate: ate || null },
         tipo: tipo || null,
         contagem: contarPorSituacao(tarefas),
@@ -178,7 +202,7 @@ function criarServidorMcp() {
             s,
             tarefas
               .filter(t => t.situacao === s)
-              .map(({ id, titulo, tipo, prazo, realizadaEm }) => ({ id, titulo, tipo, prazo, realizadaEm }))
+              .map(({ id, titulo, tipo, prazo, hora, realizadaEm }) => ({ id, titulo, tipo, prazo, hora, realizadaEm }))
           ]).filter(([, lista]) => lista.length)
         );
       }
@@ -196,10 +220,13 @@ function criarServidorMcp() {
         titulo: z.string().min(1).describe('Descrição curta da tarefa'),
         tipo: tipoSchema.optional(),
         prazo: prazoSchema.optional(),
+        hora: horaSchema.optional(),
         status: z.enum(STATUS).default('em_aberto').describe('Use em_andamento se o usuário já começou a tarefa')
       }
     },
-    async ({ titulo, tipo, prazo, status }) => {
+    async ({ titulo, tipo, prazo, hora, status }) => {
+      if (hora && !prazo) return erro('Informe também o prazo (dia) do compromisso para usar a hora.');
+
       const agora = new Date();
       const docRef = await colecaoTarefas().add({
         titulo,
@@ -208,6 +235,7 @@ function criarServidorMcp() {
         ...(status === 'realizada' && { realizadaEm: agora }),
         ...(tipo && { tipo }),
         ...(prazo && { prazo }),
+        ...(hora && { hora }),
         criadoEm: agora,
         atualizadoEm: agora
       });
@@ -220,7 +248,7 @@ function criarServidorMcp() {
     {
       title: 'Atualizar tarefa',
       description:
-        'Altera uma tarefa existente: muda o status, o título, o tipo ou o prazo. Passe só o que mudar. "atrasada" e "vence_hoje" não são status: dependem do prazo.',
+        'Altera uma tarefa existente: muda o status, o título, o tipo, o prazo ou a hora. Passe só o que mudar. "atrasada" e "vence_hoje" não são status: dependem do prazo e da hora.',
       inputSchema: {
         id: z.string().describe('Id da tarefa, obtido com listar_tarefas'),
         status: z
@@ -229,13 +257,18 @@ function criarServidorMcp() {
           .describe('em_aberto (reabrir), em_andamento (começou) ou realizada (concluiu)'),
         titulo: z.string().min(1).optional(),
         tipo: tipoSchema.nullable().optional().describe('Novo tipo ou null para remover'),
-        prazo: prazoSchema.nullable().optional().describe('Nova data limite (AAAA-MM-DD) ou null para remover')
+        prazo: prazoSchema.nullable().optional().describe('Nova data limite (AAAA-MM-DD) ou null para remover (remove também a hora)'),
+        hora: horaSchema.nullable().optional().describe('Nova hora (HH:MM) ou null para remover')
       }
     },
-    async ({ id, status, titulo, tipo, prazo }) => {
+    async ({ id, status, titulo, tipo, prazo, hora }) => {
       const docRef = colecaoTarefas().doc(id);
       const atual = await docRef.get();
       if (!atual.exists) return erro(`Tarefa ${id} não encontrada.`);
+
+      // Hora sem dia não faz sentido: tirar o prazo tira a hora
+      const prazoFinal = prazo === undefined ? atual.data().prazo : prazo;
+      if (hora && !prazoFinal) return erro('Informe também o prazo (dia) do compromisso para usar a hora.');
 
       const mudancas = { atualizadoEm: new Date() };
       if (status !== undefined) {
@@ -250,6 +283,8 @@ function criarServidorMcp() {
       if (titulo !== undefined) mudancas.titulo = titulo;
       if (tipo !== undefined) mudancas.tipo = tipo ?? admin.firestore.FieldValue.delete();
       if (prazo !== undefined) mudancas.prazo = prazo ?? admin.firestore.FieldValue.delete();
+      if (hora !== undefined) mudancas.hora = hora ?? admin.firestore.FieldValue.delete();
+      if (prazo === null) mudancas.hora = admin.firestore.FieldValue.delete();
 
       await docRef.update(mudancas);
       return resposta({ atualizada: paraJson(await docRef.get()) });

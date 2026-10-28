@@ -16,8 +16,8 @@ Você (voz/texto) → app do Claude → conector "Agenda" → este servidor (Ver
 |---|---|
 | `listar_tarefas` | Lista por situação (em aberto, em andamento, vence hoje, atrasada, realizada) e tipo |
 | `resumo_tarefas` | Conta e agrupa as tarefas de um período por situação e tipo |
-| `criar_tarefa` | Cria uma tarefa, com tipo, prazo (AAAA-MM-DD) e status opcionais |
-| `atualizar_tarefa` | Muda o status, o título, o tipo ou o prazo |
+| `criar_tarefa` | Cria uma tarefa, com tipo, prazo (AAAA-MM-DD), hora (HH:MM) e status opcionais |
+| `atualizar_tarefa` | Muda o status, o título, o tipo, o prazo ou a hora |
 
 ### Situação da tarefa
 
@@ -27,7 +27,7 @@ Você (voz/texto) → app do Claude → conector "Agenda" → este servidor (Ver
 | `em_andamento` | Já começou |
 | `realizada` | Concluída |
 | `vence_hoje` | Não realizada e o prazo é hoje |
-| `atrasada` | Não realizada e com prazo vencido |
+| `atrasada` | Não realizada e com prazo vencido, ou prazo hoje com a hora já passada |
 
 `vence_hoje` e `atrasada` são calculadas pela data de Brasília a cada consulta, não são gravadas.
 
@@ -43,6 +43,7 @@ Exemplos do que dizer ao Claude:
 ```
 "Anota: pagar a conta de luz até sexta e comprar ração"
 "Anota na fazenda: vacinar o gado na segunda"
+"Marca dentista quinta às 14h30"
 "O que eu ainda tenho pendente?"
 "O que tem de Softmax?"
 "Comecei a vacinação do gado"
@@ -130,6 +131,7 @@ usuarios/{base64(TAREFAS_EMAIL)}/tarefas/{taskId}
   ├─ concluida: boolean (espelho de status = realizada, usado pelo backup)
   ├─ tipo: string (minúsculas, opcional — ex.: fazenda, softmax, pessoal)
   ├─ prazo: string (AAAA-MM-DD, opcional)
+  ├─ hora: string (HH:MM, opcional, só com prazo)
   ├─ realizadaEm: timestamp (quando foi concluída)
   ├─ criadoEm: timestamp
   └─ atualizadoEm: timestamp
