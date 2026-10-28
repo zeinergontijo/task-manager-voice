@@ -18,6 +18,7 @@ Você (voz/texto) → app do Claude → conector "Agenda" → este servidor (Ver
 | `resumo_tarefas` | Conta e agrupa as tarefas de um período por situação e tipo |
 | `criar_tarefa` | Cria uma tarefa, com tipo, prazo (AAAA-MM-DD), hora (HH:MM) e status opcionais |
 | `atualizar_tarefa` | Muda o status, o título, o tipo, o prazo ou a hora |
+| `deletar_tarefa` | Apaga uma tarefa |
 
 ### Situação da tarefa
 
@@ -36,7 +37,6 @@ Você (voz/texto) → app do Claude → conector "Agenda" → este servidor (Ver
 No `resumo_tarefas`, cada tarefa entra no período pela sua **data de referência**:
 realizadas pela data em que foram concluídas; as demais pelo prazo, ou pela data de
 criação se não tiverem prazo.
-| `deletar_tarefa` | Apaga uma tarefa |
 
 Exemplos do que dizer ao Claude:
 
