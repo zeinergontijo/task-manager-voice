@@ -87,8 +87,24 @@ Environment Variables**, cadastre:
 | `FIREBASE_DATABASE_URL` | Mesmo valor do `.env` |
 | `TAREFAS_EMAIL` | Mesmo valor do `.env` |
 | `MCP_TOKEN` | Mesmo valor do `.env` |
+| `OUTRAS_PESSOAS` | Opcional, veja "Mais de uma pessoa" |
 
 A variável `ANTHROPIC_API_KEY` não é mais usada e pode ser removida.
+
+## 👥 Mais de uma pessoa
+
+Cada pessoa tem sua agenda separada e sua própria URL do conector. A pessoa principal
+continua em `TAREFAS_EMAIL`/`MCP_TOKEN`; as outras vão em `OUTRAS_PESSOAS`, como
+`email:token` separados por vírgula:
+
+```env
+OUTRAS_PESSOAS=marcia@email.com:outro_token_longo_e_aleatorio
+```
+
+Gere um token novo para cada pessoa (mesmo comando acima) e cadastre a variável também
+na Vercel. Cada uma adiciona o conector na própria conta do Claude com a sua URL:
+`https://SEU-APP.vercel.app/mcp/TOKEN_DELA`. Quem tem uma URL só enxerga as tarefas
+daquela pessoa.
 
 ## 🔌 Conectar ao Claude
 
@@ -125,7 +141,7 @@ O backup diário para o Google Drive continua igual — veja `BACKUP-AUTOMATICO.
 ## 📝 Estrutura de dados
 
 ```
-usuarios/{base64(TAREFAS_EMAIL)}/tarefas/{taskId}
+usuarios/{base64(email da pessoa)}/tarefas/{taskId}
   ├─ titulo: string
   ├─ status: em_aberto | em_andamento | realizada
   ├─ concluida: boolean (espelho de status = realizada, usado pelo backup)

@@ -22,10 +22,34 @@ const db = admin.firestore();
 
 // Dono das tarefas: mesmo ID que o app antigo gerava (email em base64),
 // para continuar usando as tarefas já salvas
-const USUARIO_ID = Buffer.from(process.env.TAREFAS_EMAIL || '').toString('base64');
+function idDoEmail(email) {
+  return Buffer.from(email).toString('base64');
+}
 
-function colecaoTarefas() {
-  return db.collection('usuarios').doc(USUARIO_ID).collection('tarefas');
+// Cada pessoa tem seu token e suas tarefas. A principal vem de TAREFAS_EMAIL/MCP_TOKEN;
+// as demais de OUTRAS_PESSOAS, no formato "email:token,email:token"
+function lerPessoas() {
+  const pares = [[process.env.TAREFAS_EMAIL, process.env.MCP_TOKEN]];
+  for (const item of (process.env.OUTRAS_PESSOAS || '').split(',')) {
+    if (!item.trim()) continue;
+    const separador = item.lastIndexOf(':');
+    pares.push([item.slice(0, separador), item.slice(separador + 1)]);
+  }
+
+  const pessoas = [];
+  for (const [email, token] of pares.map(([e, t]) => [(e || '').trim(), (t || '').trim()])) {
+    if (!email) console.warn('⚠️ Pessoa sem email (TAREFAS_EMAIL ou OUTRAS_PESSOAS)');
+    else if (token.length < 32) console.warn(`⚠️ Token de ${email} ausente ou curto demais (mínimo 32 caracteres)`);
+    else if (pessoas.some(p => p.token === token)) console.warn(`⚠️ Token de ${email} repetido; cada pessoa precisa do seu`);
+    else pessoas.push({ email, token, usuarioId: idDoEmail(email) });
+  }
+  return pessoas;
+}
+
+const PESSOAS = lerPessoas();
+
+function colecaoTarefas(usuarioId) {
+  return db.collection('usuarios').doc(usuarioId).collection('tarefas');
 }
 
 // Status gravado no banco; "atrasada" e "vence_hoje" não são gravadas, são calculadas pelo prazo
@@ -124,8 +148,9 @@ const tipoSchema = z
   .describe('Categoria da tarefa, ex.: fazenda, softmax, pessoal. Prefira um tipo que já exista (veja tiposExistentes em listar_tarefas)');
 
 // Ferramentas que o Claude pode usar
-function criarServidorMcp() {
+function criarServidorMcp(usuarioId) {
   const server = new McpServer({ name: 'agenda', version: '2.0.0' });
+  const tarefasDaPessoa = colecaoTarefas(usuarioId);
 
   server.registerTool(
     'listar_tarefas',
@@ -143,7 +168,7 @@ function criarServidorMcp() {
     },
     async ({ situacao, tipo }) => {
       const agora = agoraBR();
-      const snapshot = await colecaoTarefas().get();
+      const snapshot = await tarefasDaPessoa.get();
       const todas = snapshot.docs.map(doc => paraJson(doc, agora));
       const tarefas = todas
         .filter(t =>
@@ -176,7 +201,7 @@ function criarServidorMcp() {
       if (de && ate && de > ate) return erro('A data "de" é posterior à data "ate".');
 
       const agora = agoraBR();
-      const snapshot = await colecaoTarefas().get();
+      const snapshot = await tarefasDaPessoa.get();
       const tarefas = snapshot.docs
         .map(doc => paraJson(doc, agora))
         .filter(t => !tipo || t.tipo === tipo)
@@ -228,7 +253,7 @@ function criarServidorMcp() {
       if (hora && !prazo) return erro('Informe também o prazo (dia) do compromisso para usar a hora.');
 
       const agora = new Date();
-      const docRef = await colecaoTarefas().add({
+      const docRef = await tarefasDaPessoa.add({
         titulo,
         status,
         concluida: status === 'realizada',
@@ -262,7 +287,7 @@ function criarServidorMcp() {
       }
     },
     async ({ id, status, titulo, tipo, prazo, hora }) => {
-      const docRef = colecaoTarefas().doc(id);
+      const docRef = tarefasDaPessoa.doc(id);
       const atual = await docRef.get();
       if (!atual.exists) return erro(`Tarefa ${id} não encontrada.`);
 
@@ -302,7 +327,7 @@ function criarServidorMcp() {
       annotations: { destructiveHint: true }
     },
     async ({ id }) => {
-      const docRef = colecaoTarefas().doc(id);
+      const docRef = tarefasDaPessoa.doc(id);
       const doc = await docRef.get();
       if (!doc.exists) return erro(`Tarefa ${id} não encontrada.`);
 
@@ -317,23 +342,27 @@ function criarServidorMcp() {
 const app = express();
 app.use(express.json());
 
-// O token secreto faz parte da URL do conector, para que só você acesse
-function tokenValido(token) {
-  const esperado = process.env.MCP_TOKEN || '';
-  if (esperado.length < 32 || typeof token !== 'string') return false;
+// O token secreto faz parte da URL do conector e diz de quem são as tarefas
+function tokenIgual(token, esperado) {
   const a = Buffer.from(token);
   const b = Buffer.from(esperado);
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+function pessoaDoToken(token) {
+  if (typeof token !== 'string') return null;
+  return PESSOAS.find(p => tokenIgual(token, p.token)) || null;
+}
+
 // Modo sem sessão: cada requisição cria seu próprio servidor MCP (ideal para a Vercel)
 app.post('/mcp/:token', async (req, res) => {
-  if (!tokenValido(req.params.token)) {
+  const pessoa = pessoaDoToken(req.params.token);
+  if (!pessoa) {
     return res.status(404).json({ erro: 'Não encontrado' });
   }
 
   try {
-    const server = criarServidorMcp();
+    const server = criarServidorMcp(pessoa.usuarioId);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     res.on('close', () => {
       transport.close();
@@ -361,8 +390,7 @@ app.get('/', (req, res) => {
   res.send('Servidor MCP da Agenda rodando.');
 });
 
-if (!USUARIO_ID) console.warn('⚠️ TAREFAS_EMAIL não definido no .env');
-if ((process.env.MCP_TOKEN || '').length < 32) console.warn('⚠️ MCP_TOKEN ausente ou curto demais (mínimo 32 caracteres)');
+if (!PESSOAS.length) console.warn('⚠️ Nenhuma pessoa configurada: defina TAREFAS_EMAIL e MCP_TOKEN no .env');
 
 // Localmente sobe o servidor; na Vercel o app é exportado
 if (require.main === module) {
